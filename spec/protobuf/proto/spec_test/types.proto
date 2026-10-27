@@ -1,0 +1,144 @@
+// Test messages for the Crystal protobuf runtime and generator specs.
+syntax = "proto3";
+
+package spec_test;
+
+import "google/protobuf/timestamp.proto";
+
+// A colour.
+enum Color {
+  // Unset.
+  COLOR_UNSPECIFIED = 0;
+  RED = 1;
+  GREEN = 2;
+  // Negative values are encoded as 10-byte varints.
+  NEGATIVE = -1;
+}
+
+// Every scalar type, with implicit presence.
+message Scalars {
+  int32 int32_value = 1;
+  int64 int64_value = 2;
+  uint32 uint32_value = 3;
+  uint64 uint64_value = 4;
+  sint32 sint32_value = 5;
+  sint64 sint64_value = 6;
+  fixed32 fixed32_value = 7;
+  fixed64 fixed64_value = 8;
+  sfixed32 sfixed32_value = 9;
+  sfixed64 sfixed64_value = 10;
+  float float_value = 11;
+  double double_value = 12;
+  bool bool_value = 13;
+  string string_value = 14;
+  bytes bytes_value = 15;
+  Color color = 16;
+}
+
+// Proto3 optional fields have explicit presence.
+message Optionals {
+  optional int32 int32_value = 1;
+  optional string string_value = 2;
+  optional Color color = 3;
+  optional double double_value = 4;
+  Scalars message_value = 5;
+}
+
+message Repeateds {
+  repeated int32 int32_values = 1;
+  repeated sint64 sint64_values = 2;
+  repeated fixed32 fixed32_values = 3;
+  repeated double double_values = 4;
+  repeated bool bool_values = 5;
+  repeated Color colors = 6;
+  repeated string strings = 7;
+  repeated bytes bytes_values = 8;
+  repeated Scalars messages = 9;
+  repeated int32 unpacked_int32_values = 10 [packed = false];
+}
+
+message Maps {
+  map<int32, string> int32_to_string = 1;
+  map<int64, int64> int64_to_int64 = 2;
+  map<uint32, uint32> uint32_to_uint32 = 3;
+  map<uint64, uint64> uint64_to_uint64 = 4;
+  map<sint32, sint32> sint32_to_sint32 = 5;
+  map<sint64, sint64> sint64_to_sint64 = 6;
+  map<fixed32, fixed32> fixed32_to_fixed32 = 7;
+  map<fixed64, fixed64> fixed64_to_fixed64 = 8;
+  map<sfixed32, sfixed32> sfixed32_to_sfixed32 = 9;
+  map<sfixed64, sfixed64> sfixed64_to_sfixed64 = 10;
+  map<bool, bool> bool_to_bool = 11;
+  map<string, bytes> string_to_bytes = 12;
+  map<string, Scalars> string_to_message = 13;
+  map<string, Color> string_to_color = 14;
+  map<string, double> string_to_double = 15;
+}
+
+message Choice {
+  // The choice.
+  oneof value {
+    string name = 1;
+    int32 number = 2;
+    Scalars message = 3;
+    Color color = 4;
+    bytes data = 5;
+  }
+  int32 other = 6;
+}
+
+// Nested types and recursion.
+message Outer {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_A = 1;
+  }
+
+  message Middle {
+    message Inner {
+      string text = 1;
+      Kind kind = 2;
+    }
+    Inner inner = 1;
+    repeated Inner inners = 2;
+  }
+
+  Middle middle = 1;
+  Outer child = 2;
+  Kind kind = 3;
+  google.protobuf.Timestamp created_at = 4;
+  repeated Middle.Inner inners = 5;
+}
+
+// Field names that clash with Crystal keywords or reserved methods.
+message Keywords {
+  int32 end = 1;
+  string class = 2;
+  bool hash = 3;
+  int32 def = 4;
+  string to_s = 5;
+  int32 self = 6;
+}
+
+// Nested types whose names clash with Crystal's built-in types.
+message NameClash {
+  enum Bool {
+    NO = 0;
+    YES = 1;
+  }
+  message String {
+    string value = 1;
+  }
+  bool flag = 1;
+  string text = 2;
+  Bool answer = 3;
+  String wrapped = 4;
+  map<string, bool> flags = 5;
+}
+
+// A message whose fields are a subset of `Scalars`, to test unknown fields.
+message ScalarsSubset {
+  int32 int32_value = 1;
+}
+
+message Empty {}

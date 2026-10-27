@@ -1,0 +1,29 @@
+edition = "2023";
+
+package spec_test.editions;
+
+option features.utf8_validation = VERIFY;
+
+message EditionsMessage {
+  // Explicit presence is the editions default.
+  int32 explicit_value = 1;
+  int32 implicit_value = 2 [features.field_presence = IMPLICIT];
+  int32 required_value = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Packed is the editions default.
+  repeated int32 packed_values = 4;
+  repeated int32 expanded_values = 5 [features.repeated_field_encoding = EXPANDED];
+  string checked_text = 6;
+  string unchecked_text = 7 [features.utf8_validation = NONE];
+  repeated string unchecked_texts = 8 [features.utf8_validation = NONE];
+  Child child = 9;
+  Child delimited_child = 10 [features.message_encoding = DELIMITED];
+
+  message Child {
+    int32 value = 1;
+  }
+}
+
+enum OpenEnum {
+  OPEN_ENUM_UNSPECIFIED = 0;
+  OPEN_ENUM_ONE = 1;
+}

@@ -1,0 +1,18 @@
+edition = "2023";
+
+package spec_test.editions;
+
+// File-level features apply to every field in the file.
+option features.field_presence = IMPLICIT;
+option features.repeated_field_encoding = EXPANDED;
+option features.utf8_validation = NONE;
+
+message ImplicitMessage {
+  int32 value = 1;
+  repeated int32 values = 2;
+  string text = 3;
+  map<string, string> labels = 4;
+  int32 explicit_value = 5 [features.field_presence = EXPLICIT];
+  repeated int32 packed_values = 6 [features.repeated_field_encoding = PACKED];
+  string checked_text = 7 [features.utf8_validation = VERIFY];
+}

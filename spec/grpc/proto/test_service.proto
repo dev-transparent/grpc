@@ -1,0 +1,71 @@
+// Test service used by the gRPC layer specs (spec/grpc). Regenerate the
+// Crystal code with script/generate_grpc_spec_protos.sh.
+syntax = "proto3";
+
+package grpc_spec;
+
+message Empty {}
+
+// A request whose fields instruct the server how to behave.
+message EchoRequest {
+  // Echoed back in the response.
+  string message = 1;
+  // Arbitrary payload, counted by ClientStream.
+  bytes payload = 2;
+  // Size of the zeroed payload returned in the response.
+  int32 response_size = 3;
+  // Number of responses sent by ServerStream / Bidi (per request).
+  int32 count = 4;
+  // Milliseconds to sleep before responding (cancellation aware).
+  int32 sleep_ms = 5;
+  // When non-zero the call fails with this status code.
+  int32 status_code = 6;
+  string status_message = 7;
+  // Raise a non-gRPC exception from the handler.
+  bool raise_exception = 8;
+  // Response metadata (headers) and trailers set by the handler.
+  map<string, string> headers = 9;
+  map<string, string> trailers = 10;
+  // Compression to set on the server context ("" leaves the default).
+  string compression = 11;
+  // ServerStream: fail with status_code after this many messages.
+  int32 fail_after = 12;
+}
+
+message EchoResponse {
+  string message = 1;
+  bytes payload = 2;
+  // Index of the message within a stream.
+  int32 index = 3;
+  // Request metadata as seen by the server.
+  map<string, bytes> metadata = 4;
+  // Whether the request message was compressed.
+  bool request_compressed = 5;
+  // Remaining time until the deadline in milliseconds, -1 without deadline.
+  int64 timeout_ms = 6;
+  string authority = 7;
+  string peer = 8;
+  string method_path = 9;
+}
+
+message Summary {
+  int32 count = 1;
+  int64 total_bytes = 2;
+  repeated string messages = 3;
+  bool any_compressed = 4;
+}
+
+// Exercises all four call kinds.
+service TestService {
+  rpc Unary(EchoRequest) returns (EchoResponse);
+  rpc ServerStream(EchoRequest) returns (stream EchoResponse);
+  rpc ClientStream(stream EchoRequest) returns (Summary);
+  rpc Bidi(stream EchoRequest) returns (stream EchoResponse);
+  // Always succeeds with an empty response.
+  rpc Ping(Empty) returns (Empty);
+}
+
+// Never registered with the server.
+service MissingService {
+  rpc Missing(Empty) returns (Empty);
+}

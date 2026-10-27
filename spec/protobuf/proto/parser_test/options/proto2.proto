@@ -1,0 +1,74 @@
+// proto2 features: defaults, extension ranges (with options), groups,
+// reserved ranges and message sets.
+syntax = "proto2";
+
+package opts.p2;
+
+import "parser_test/options/custom.proto";
+
+message Defaults {
+  optional int32 i32 = 1 [default = -0x10];
+  optional uint32 u32 = 2 [default = 017];
+  optional int64 i64 = 3 [default = -9223372036854775808];
+  optional uint64 u64 = 4 [default = 18446744073709551615];
+  optional float f = 5 [default = 1e10];
+  optional float f2 = 6 [default = 0.1];
+  optional double d = 7 [default = 0.1];
+  optional double d2 = 8 [default = -inf];
+  optional double d3 = 9 [default = nan];
+  optional double d4 = 10 [default = 12];
+  optional float f3 = 11 [default = 3.4028235e38];
+  optional bool b = 12 [default = true];
+  optional string s = 13 [default = "a\"b\\c\n\x01é"];
+  optional bytes by = 14 [default = "\000\377\'\"\t\x7f"];
+  optional Level e = 15 [default = HIGH];
+  optional sint64 s64 = 16 [default = -1];
+  optional fixed64 x64 = 17 [default = 0xFFFFFFFFFFFFFFFF];
+  optional double d5 = 18 [default = 1e-300];
+  optional float f4 = 19 [default = -0.0];
+
+  extensions 100 to 199 [(opts.range_note) = "first"];
+  extensions 300, 400 to max;
+  reserved 20 to 29, 50;
+  reserved "old", "older";
+
+  optional group Inner = 30 {
+    optional int32 x = 31;
+  }
+  repeated group Items = 32 {
+    optional int32 y = 33;
+  }
+
+  enum Mode {
+    MODE_A = 1;
+    MODE_B = -2;
+    reserved 5 to 10, 20, 30 to max;
+    reserved "MODE_C";
+  }
+}
+
+extend Defaults {
+  optional int32 ext_int = 100 [default = 7];
+  repeated string ext_strings = 101;
+  optional group ExtGroup = 102 {
+    optional int32 z = 103;
+  }
+}
+
+message Container {
+  extend Defaults {
+    optional Container back = 300;
+  }
+}
+
+message Set {
+  option message_set_wire_format = true;
+  extensions 4 to max;
+}
+
+message SetMember {
+  extend Set {
+    optional SetMember member = 12345;
+  }
+  optional string value = 1;
+}

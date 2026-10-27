@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package torture.p3;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
+
+message Msg {
+  optional int32 opt = 1;
+  optional string _opt = 2;  // forces synthetic oneof renaming
+  int32 plain = 3;
+  repeated sint64 nums = 4 [packed = false];
+  map<string, google.protobuf.Any> anys = 5;
+  google.protobuf.StringValue wrapped = 6;
+  oneof kind {
+    int32 a = 7;
+    Msg b = 8;
+  }
+  optional Msg c = 9;
+  enum E { E_ZERO = 0; E_ONE = 1; }
+  E e = 10;
+  message optional_type { int32 x = 1; }
+  optional_type ot = 11;
+}
+
+/*
+ * Block comment documenting the service.
+ */
+service S {
+  rpc Unary (Msg) returns (Msg);  // trailing
+  rpc ClientStream (stream Msg) returns (Msg);
+}

@@ -1,0 +1,31 @@
+// Edition 2024 syntax: visibility modifiers and option imports.
+edition = "2024";
+
+package opts.e2024;
+
+import "google/protobuf/descriptor.proto";
+import option "parser_test/options/custom.proto";
+
+option features.field_presence = IMPLICIT;
+option features.enforce_naming_style = STYLE_LEGACY;
+
+export message Visible {
+  int32 a = 1 [features.field_presence = EXPLICIT];
+  local message Hidden {
+    string b = 1;
+  }
+  Hidden hidden = 2 [features.message_encoding = DELIMITED];
+  repeated int32 values = 3 [features.repeated_field_encoding = EXPANDED];
+  reserved field_x, field_y;
+}
+
+local enum Internal {
+  option features.enum_type = CLOSED;
+  INTERNAL_ONE = 1;
+  INTERNAL_TWO = 2;
+  reserved INTERNAL_OLD;
+}
+
+message Plain {
+  Internal kind = 1 [features.field_presence = EXPLICIT];
+}

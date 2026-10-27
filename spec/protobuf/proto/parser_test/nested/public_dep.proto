@@ -1,0 +1,3 @@
+syntax = "proto2";
+package torture.v1;
+import public "parser_test/nested/deep.proto";

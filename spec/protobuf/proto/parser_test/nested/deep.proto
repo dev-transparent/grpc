@@ -1,0 +1,4 @@
+syntax = "proto2";
+package torture.v1;
+// A dependency reachable through a public import.
+message Dep { optional int32 x = 1; }

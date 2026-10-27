@@ -1,0 +1,2 @@
+# Text format conformance tests expected to fail. Text format is not
+# supported: the testee reports every text format request as skipped.

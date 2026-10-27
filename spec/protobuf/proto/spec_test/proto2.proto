@@ -1,0 +1,81 @@
+syntax = "proto2";
+
+package spec_test.proto2;
+
+message Legacy {
+  optional int32 value = 1;
+  required string name = 2;
+  repeated int32 values = 3;
+  repeated int32 packed_values = 4 [packed = true];
+  optional string text = 5;
+  optional group Settings = 6 {
+    optional int32 level = 7;
+  }
+  optional int32 with_default = 8 [default = 42];
+}
+
+// A field with a custom JSON name.
+message JsonNames {
+  optional int32 renamed = 1 [json_name = "customName"];
+}
+
+enum Closed {
+  CLOSED_ZERO = 0;
+  CLOSED_ONE = 1;
+  CLOSED_FIVE = 5;
+}
+
+// Closed enum fields of every kind: unknown values go to unknown fields.
+message Closedness {
+  optional Closed single = 1;
+  repeated Closed list = 2;
+  repeated Closed packed_list = 3 [packed = true];
+  map<int32, Closed> by_key = 4;
+  optional Closed with_default = 5 [default = CLOSED_FIVE];
+  oneof choice {
+    Closed in_oneof = 6;
+  }
+}
+
+// Required fields, nested and in extensions.
+message Requirements {
+  required int32 a = 1;
+  optional Requirements child = 2;
+  repeated Requirements children = 3;
+  map<string, Requirements> by_name = 4;
+  extensions 100 to 200;
+}
+
+extend Requirements {
+  optional Requirements required_ext = 100;
+  repeated sint32 packed_ext = 101 [packed = true];
+  optional Closed closed_ext = 102;
+  repeated Closed closed_list_ext = 103;
+  optional string text_ext = 104;
+  repeated group GroupExt = 105 {
+    optional int32 g = 106;
+  }
+}
+
+// Default values of every type.
+message Defaults {
+  optional int32 i32 = 1 [default = -0x10];
+  optional uint32 u32 = 2 [default = 017];
+  optional int64 i64 = 3 [default = -9223372036854775808];
+  optional uint64 u64 = 4 [default = 18446744073709551615];
+  optional sint32 s32 = 5 [default = -7];
+  optional fixed64 f64 = 6 [default = 0xFFFFFFFFFFFFFFFF];
+  optional float f = 7 [default = 1e10];
+  optional double d = 8 [default = -inf];
+  optional double nan = 9 [default = nan];
+  optional double tiny = 10 [default = 1e-300];
+  optional bool b = 11 [default = true];
+  optional string s = 12 [default = "a\"b\\c\n#{x}é"];
+  optional bytes by = 13 [default = "\000\377\'\"\t"];
+  optional Closed e = 14 [default = CLOSED_ONE];
+  optional Closed first = 15;
+  optional string none = 16;
+  oneof choice {
+    int32 in_oneof = 17 [default = 3];
+  }
+}

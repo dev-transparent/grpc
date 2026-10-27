@@ -1,0 +1,3 @@
+syntax = "proto2";
+package torture.v1;
+message Reexported { optional string y = 1; }

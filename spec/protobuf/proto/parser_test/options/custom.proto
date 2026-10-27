@@ -1,0 +1,90 @@
+// Custom option definitions used by options/usage.proto.
+syntax = "proto2";
+
+package opts;
+
+import "google/protobuf/descriptor.proto";
+
+enum Level {
+  LOW = 0;
+  HIGH = 1;
+}
+
+message Rule {
+  optional string get = 1;
+  optional string post = 2;
+  optional string body = 7;
+  repeated Rule additional = 11;
+  repeated int32 codes = 12 [packed = true];
+  repeated string tags = 13;
+  optional Level level = 14;
+  optional double ratio = 15;
+  optional bool enabled = 16;
+  optional bytes blob = 17;
+  map<string, int64> limits = 18;
+  optional group Meta = 19 {
+    optional string owner = 20;
+  }
+  extensions 100 to 199;
+}
+
+extend Rule {
+  optional string rule_note = 100;
+}
+
+message Labels {
+  repeated string label = 1;
+  optional uint64 big = 2;
+  optional sint32 small = 3;
+  optional fixed32 fixed = 4;
+  optional float ratio = 5;
+}
+
+extend google.protobuf.FileOptions {
+  optional string file_note = 50000;
+  repeated int32 file_numbers = 50001;
+  optional Labels file_labels = 50002;
+  optional string source_only = 50003 [retention = RETENTION_SOURCE];
+}
+
+extend google.protobuf.MessageOptions {
+  optional Rule rule = 50000;
+  optional int64 msg_id = 50001;
+  optional Level msg_level = 50002;
+}
+
+extend google.protobuf.FieldOptions {
+  optional string field_note = 50000;
+  optional bool sensitive = 50001;
+  optional Labels field_labels = 50002;
+  optional double weight = 50003;
+  optional float fweight = 50004;
+  optional uint32 max_len = 50005;
+  optional sfixed64 offset = 50006;
+}
+
+extend google.protobuf.EnumOptions {
+  optional string enum_note = 50000;
+}
+
+extend google.protobuf.EnumValueOptions {
+  optional string value_note = 50000;
+  optional int32 value_rank = 50001;
+}
+
+extend google.protobuf.ServiceOptions {
+  optional string service_note = 50000;
+}
+
+extend google.protobuf.MethodOptions {
+  optional Rule http = 50000;
+  optional bool idempotent = 50001;
+}
+
+extend google.protobuf.OneofOptions {
+  optional string oneof_note = 50000;
+}
+
+extend google.protobuf.ExtensionRangeOptions {
+  optional string range_note = 50000;
+}

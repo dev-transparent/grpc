@@ -1,0 +1,111 @@
+// File header comment, detached from the syntax statement.
+
+/* A block comment
+ * spanning lines
+ */
+syntax = "proto2";
+
+// Package comment.
+package torture.v1;
+
+import "parser_test/nested/public_dep.proto";
+import public "parser_test/nested/reexported.proto";
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/timestamp.proto";
+
+option java_package = "com.example"
+    ".torture";  // Concatenated strings.
+option (file_opt) = { a: 1 b: "x" nested { c: [1, 2] } };
+option optimize_for = SPEED;
+
+extend google.protobuf.FileOptions {
+  optional Agg file_opt = 50001;
+}
+
+message Agg {
+  optional int32 a = 1;
+  optional string b = 2;
+  message Nested { repeated int32 c = 1; }
+  optional Nested nested = 3;
+}
+
+// Leading comment for Outer.
+message Outer {  // trailing for the brace
+  // Comment for Inner.
+  message Inner {
+    /** Javadoc style comment. */
+    optional int32 value = 1;
+    optional Inner self = 2;  // Recursive, resolved in Inner's scope.
+
+    // Detached comment (followed by a blank line).
+
+    // Leading for kind.
+    optional Kind kind = 3;
+    enum Kind {
+      // Unknown kind.
+      KIND_UNKNOWN = 0;
+      KIND_NEGATIVE = -1;
+      KIND_HEX = 0x10;  // hex
+      KIND_OCT = 010;
+    }
+  }
+
+  optional Inner inner = 1;
+  optional Outer.Inner qualified = 2;
+  optional .torture.v1.Outer.Inner fully_qualified = 3;
+  optional Inner.Kind kind = 4 [default = KIND_HEX];
+  repeated Dep dep = 5;        // from a public import chain
+  optional Reexported re = 6;  // from `import public`
+  optional google.protobuf.Timestamp at = 7;
+  optional string text = 8 [default = "a\"b\x41\101\n"];
+  optional double ratio = 9 [default = -inf];
+  optional float f = 10 [default = 1e3];
+  optional bytes raw = 11 [default = "\0\001"];
+  required int64 req = 12 [deprecated = true, json_name = "REQ"];
+  map<string, Inner> inners = 13;
+  map<int32, Inner.Kind> kinds = 14;
+  repeated int32 packed_ints = 15 [packed = true];
+
+  // Comment for the oneof.
+  oneof choice {
+    // Comment for a member.
+    string name = 20;
+    Inner inner_choice = 21;
+    group Grouped = 22 {
+      optional int32 g = 1;
+    }
+  }
+
+  // Comment for the group.
+  repeated group Result = 30 {
+    optional string url = 1;
+  }
+
+  extensions 1000 to 1999, 5000 to max;
+  reserved 40, 41 to 45;
+  reserved "foo", "bar";
+
+  // A comment before the closing brace is not attached.
+}
+
+extend Outer {
+  optional int32 ext_value = 1000;
+}
+
+enum TopLevel {
+  option allow_alias = true;
+  TOP_A = 0;
+  TOP_B = 1;
+  TOP_ALIAS = 1;
+}
+
+// Service comment.
+service Torture {
+  option deprecated = true;
+  // Method with options block.
+  rpc Get(Outer) returns (Outer.Inner) {
+    option deprecated = true;
+  }
+  rpc Stream(stream Outer) returns (stream .torture.v1.Agg);
+  rpc Empty(Agg) returns (Agg) {}
+}

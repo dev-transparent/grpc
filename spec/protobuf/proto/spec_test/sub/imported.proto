@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package spec_test.sub;
+
+import "spec_test/types.proto";
+
+// Uses types from a file in a different directory.
+message Wrapper {
+  spec_test.Scalars scalars = 1;
+  spec_test.Color color = 2;
+  map<string, spec_test.Outer> outers = 3;
+}

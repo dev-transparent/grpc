@@ -1,0 +1,82 @@
+// Exercises standard and custom options of every kind.
+syntax = "proto3";
+
+package opts.usage;
+
+import "parser_test/options/custom.proto";
+
+option java_package = "com.example.opts";
+option java_multiple_files = true;
+option go_package = "example.com/opts;opts";
+option optimize_for = CODE_SIZE;
+option cc_enable_arenas = true;
+option deprecated = false;
+option (opts.file_note) = "file";
+option (opts.file_numbers) = 1;
+option (opts.file_numbers) = -2;
+option (opts.file_numbers) = 0x10;
+option (opts.file_labels).label = "a";
+option (opts.file_labels).small = -5;
+option (opts.file_labels).big = 3;
+option (opts.source_only) = "dropped";
+
+message Request {
+  option deprecated = true;
+  option (opts.rule) = {
+    get: "/v1/{name=things/*}"
+    body: "*"
+    additional { post: "/v1/things" body: "thing" }
+    additional: [{ get: "/a" }, { get: "/b" }]
+    codes: [1, 2, 3]
+    codes: 4
+    tags: "x" tags: "y"
+    level: HIGH
+    ratio: -inf
+    enabled: true
+    blob: "\001\002abc"
+    limits { key: "k" value: 5 }
+    limits: [{ key: "j" value: -6 }]
+    Meta { owner: "me" }
+    [opts.rule_note]: "note"
+  };
+  option (opts.msg_id) = -9223372036854775808;
+  option (opts.msg_level) = LOW;
+
+  string name = 1 [(opts.field_note) = "n", (opts.sensitive) = true, deprecated = true, json_name = "nm"];
+  repeated int32 ids = 2 [packed = false, (opts.field_labels).label = "ids", (opts.weight) = 2.5, (opts.fweight) = 0.1];
+  int64 size = 3 [jstype = JS_STRING, (opts.max_len) = 4294967295, (opts.offset) = -1];
+  bytes data = 4 [ctype = CORD, debug_redact = true, retention = RETENTION_RUNTIME, targets = TARGET_TYPE_FIELD, targets = TARGET_TYPE_FILE];
+  string legacy = 5 [lazy = false, unverified_lazy = false, weak = false, (opts.weight) = inf, (opts.fweight) = -nan];
+
+  oneof choice {
+    option (opts.oneof_note) = "pick one";
+    string a = 6;
+    int32 b = 7;
+  }
+}
+
+enum Color {
+  option allow_alias = true;
+  option (opts.enum_note) = "colors";
+  COLOR_UNSPECIFIED = 0 [(opts.value_note) = "unset"];
+  RED = 1 [deprecated = true, (opts.value_rank) = -3];
+  CRIMSON = 1;
+}
+
+service Things {
+  option deprecated = true;
+  option (opts.service_note) = "svc";
+
+  rpc Get(Request) returns (Request) {
+    option (opts.http) = { get: "/v1/things/{name}" };
+    option (opts.idempotent) = true;
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc Empty(Request) returns (Request) {}
+  rpc Plain(Request) returns (Request);
+}
+
+message Aggregates {
+  string x = 1 [(opts.field_labels) = { label: "b" label: ["c", "d"] big: 18446744073709551615 small: -5 fixed: 7 ratio: 1.5 }];
+  string y = 2 [(opts.field_labels) = { label: 'q'; big: 0x10, }];
+}

@@ -1,0 +1,7 @@
+bin/
+lib/
+tmp/
+.shards/
+*.dwarf
+spec/interop/python/src/
+__pycache__/

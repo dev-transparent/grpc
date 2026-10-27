@@ -1,0 +1,2 @@
+# Binary and JSON conformance tests expected to fail (one test name per line).
+# Run script/conformance.sh to check; the list is currently empty.

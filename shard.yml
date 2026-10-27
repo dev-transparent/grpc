@@ -1,0 +1,17 @@
+name: grpc
+version: 0.1.0
+
+description: |
+  A pure Crystal implementation of HTTP/2 (RFC 9113 / RFC 7541), Protocol Buffers
+  and gRPC, including a protoc plugin for generating message classes and service stubs.
+
+authors:
+  - Gary Mardell <info@garymardell.co.uk>
+
+crystal: ">= 1.19.0"
+
+targets:
+  protoc-gen-crystal:
+    main: src/protoc-gen-crystal.cr
+
+license: MIT

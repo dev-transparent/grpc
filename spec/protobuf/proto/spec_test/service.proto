@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package spec_test.service;
+
+import "spec_test/types.proto";
+
+// Echoes things.
+service Echo {
+  // Unary.
+  rpc Echo(spec_test.Scalars) returns (spec_test.Scalars);
+  rpc ServerStream(spec_test.Scalars) returns (stream spec_test.Scalars);
+  rpc ClientStream(stream spec_test.Scalars) returns (spec_test.Scalars);
+  rpc Bidi(stream spec_test.Scalars) returns (stream spec_test.Scalars);
+  rpc Close(spec_test.Empty) returns (spec_test.Empty);
+}
