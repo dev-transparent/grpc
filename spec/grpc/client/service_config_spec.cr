@@ -71,35 +71,92 @@ describe GRPC::ServiceConfig do
   end
 
   it "selects load balancing policies" do
-    parse(%({"loadBalancingConfig": [{"unknown_policy": {}}, {"round_robin": {}}]})).load_balancing_policy.should eq "round_robin"
-    parse(%({"loadBalancingPolicy": "ROUND_ROBIN"})).load_balancing_policy.should eq "round_robin"
-    parse("{}").load_balancing_policy.should be_nil
+    config = parse(%({"loadBalancingConfig": [{"unknown_policy": {"a": 1}}, {"round_robin": {}}]}))
+    config.load_balancing.should be_a(GRPC::RoundRobinConfig)
+    config.load_balancing_config.not_nil!.first.should be_a(GRPC::UnsupportedLoadBalancingConfig)
+    parse(%({"loadBalancingConfig": [{"pick_first": {"shuffleAddressList": true}}]})).load_balancing
+      .as(GRPC::PickFirstConfig).shuffle_address_list?.should be_true
+    deprecated = parse(%({"loadBalancingPolicy": "ROUND_ROBIN"}))
+    deprecated.load_balancing_policy.should eq GRPC::ServiceConfig::LoadBalancingPolicy::RoundRobin
+    deprecated.load_balancing.should be_a(GRPC::RoundRobinConfig)
+    parse(%({"loadBalancingPolicy": "pick_first"})).load_balancing.should be_a(GRPC::PickFirstConfig)
+    parse("{}").load_balancing.should be_nil
   end
 
   it "rejects invalid configs" do
-    invalid("[]", /JSON object/)
+    invalid("[]", /Expected BeginObject/)
     invalid("{", /Invalid service config JSON/)
-    invalid(%({"methodConfig": {}}), /methodConfig must be an array/)
+    invalid(%({"methodConfig": {}}), /Expected BeginArray/)
     invalid(%({"methodConfig": [{"name": [{"method": "m"}]}]}), /requires a service/)
     invalid(%({"methodConfig": [{"name": [{"service": "s"}]}, {"name": [{"service": "s"}]}]}), /Duplicate/)
-    invalid(method_config(%("timeout": "1")), /invalid duration/)
+    invalid(method_config(%("timeout": "1")), /Invalid duration/)
     invalid(method_config(%("timeout": 1)), /duration string/)
-    invalid(method_config(%("waitForReady": "yes")), /boolean/)
+    invalid(method_config(%("waitForReady": "yes")), /Bool/)
     invalid(method_config(%("maxRequestMessageBytes": -1)), /non-negative/)
     invalid(method_config(%("retryPolicy": {#{RETRY.sub("3", "1")}})), /greater than 1/)
-    invalid(method_config(%("retryPolicy": {#{RETRY.sub(%("maxAttempts": 3, ), "")}})), /maxAttempts is required/)
+    invalid(method_config(%("retryPolicy": {#{RETRY.sub(%("maxAttempts": 3, ), "")}})), /Missing JSON attribute: maxAttempts/)
     invalid(method_config(%("retryPolicy": {#{RETRY.sub("0.1s", "0s")}})), /initialBackoff must be > 0/)
     invalid(method_config(%("retryPolicy": {#{RETRY.sub("\"backoffMultiplier\": 2", "\"backoffMultiplier\": 0")}})), /backoffMultiplier/)
     invalid(method_config(%("retryPolicy": {#{RETRY.sub(%(["UNAVAILABLE"]), "[]")}})), /must not be empty/)
-    invalid(method_config(%("retryPolicy": {#{RETRY.sub("UNAVAILABLE", "NOPE")}})), /invalid status code/)
+    invalid(method_config(%("retryPolicy": {#{RETRY.sub("UNAVAILABLE", "NOPE")}})), /Invalid status code/)
     invalid(method_config(%("retryPolicy": {#{RETRY}}, "hedgingPolicy": {"maxAttempts": 2})), /mutually exclusive/)
-    invalid(method_config(%("hedgingPolicy": {"maxAttempts": 2, "hedgingDelay": "x"})), /invalid duration/)
+    invalid(method_config(%("hedgingPolicy": {"maxAttempts": 2, "hedgingDelay": "x"})), /Invalid duration/)
     invalid(%({"retryThrottling": {"maxTokens": 0, "tokenRatio": 1}}), /maxTokens/)
     invalid(%({"retryThrottling": {"maxTokens": 1001, "tokenRatio": 1}}), /maxTokens/)
     invalid(%({"retryThrottling": {"maxTokens": 10, "tokenRatio": 0.0001}}), /tokenRatio/)
     invalid(%({"loadBalancingConfig": [{"nope": {}}]}), /No supported policy/)
     invalid(%({"loadBalancingConfig": [{"round_robin": {}, "pick_first": {}}]}), /exactly one policy/)
+    invalid(%({"loadBalancingConfig": [{"round_robin": 1}]}), /must be an object/)
     invalid(%({"loadBalancingPolicy": "nope"}), /Unsupported loadBalancingPolicy/)
+  end
+
+  it "builds typed configs in code and round-trips them through JSON" do
+    config = GRPC::ServiceConfig.new(
+      load_balancing_config: [GRPC::RoundRobinConfig.new] of GRPC::LoadBalancingConfig,
+      method_configs: [
+        GRPC::ServiceConfig::MethodConfig.new(
+          names: [GRPC::ServiceConfig::MethodName.new("pkg.Svc"), GRPC::ServiceConfig::MethodName.new("pkg.Other", "Get")],
+          timeout: 1.5.seconds, wait_for_ready: true, max_response_message_bytes: 4096_i64,
+          retry_policy: GRPC::ServiceConfig::RetryPolicy.new(
+            max_attempts: 3, initial_backoff: 100.milliseconds, max_backoff: 1.second,
+            backoff_multiplier: 2.0, retryable_status_codes: Set{GRPC::StatusCode::Unavailable})),
+        GRPC::ServiceConfig::MethodConfig.new(
+          names: [GRPC::ServiceConfig::MethodName.new],
+          hedging_policy: GRPC::ServiceConfig::HedgingPolicy.new(max_attempts: 2, hedging_delay: 50.milliseconds)),
+      ],
+      retry_throttling: GRPC::ServiceConfig::RetryThrottling.new(max_tokens: 10, token_ratio: 0.5))
+
+    json = config.to_json
+    json.should contain(%("timeout":"1.5s"))
+    json.should contain(%("retryableStatusCodes":["UNAVAILABLE"]))
+    json.should contain(%("loadBalancingConfig":[{"round_robin":{}}]))
+    parsed = parse(json)
+    parsed.should eq config
+    parsed.method_config("/pkg.Other/Get").not_nil!.max_response_message_bytes.should eq 4096
+    parsed.method_config("/x.Y/Z").not_nil!.hedging_policy.not_nil!.hedging_delay.should eq 50.milliseconds
+  end
+
+  it "validates configs built in code" do
+    expect_raises(GRPC::ServiceConfig::Error, /greater than 1/) do
+      GRPC::ServiceConfig::RetryPolicy.new(max_attempts: 1, initial_backoff: 1.second, max_backoff: 1.second,
+        backoff_multiplier: 2.0, retryable_status_codes: Set{GRPC::StatusCode::Unavailable})
+    end
+    expect_raises(GRPC::ServiceConfig::Error, /requires a service/) { GRPC::ServiceConfig::MethodName.new(nil, "m") }
+    expect_raises(GRPC::ServiceConfig::Error, /maxTokens/) { GRPC::ServiceConfig::RetryThrottling.new(max_tokens: 0, token_ratio: 1.0) }
+  end
+
+  it "loads configs from files" do
+    path = File.tempname("service_config", ".json")
+    File.write(path, %({"methodConfig": [{"name": [{"service": "s"}], "timeout": "3s"}]}))
+    GRPC::ServiceConfig.load(path).method_config("/s/m").not_nil!.timeout.should eq 3.seconds
+  ensure
+    File.delete?(path) if path
+  end
+
+  it "formats durations" do
+    GRPC::ServiceConfig.format_duration(1.second).should eq "1s"
+    GRPC::ServiceConfig.format_duration(1.5.seconds).should eq "1.5s"
+    GRPC::ServiceConfig.format_duration(1.nanosecond).should eq "0.000000001s"
   end
 
   it "raises for an invalid config given to a channel" do
@@ -233,5 +290,51 @@ describe GRPC::ServiceConfig do
         server.close
       end
     end
+  end
+end
+
+# A custom policy with its own typed config.
+private class WeightedConfig < GRPC::LoadBalancingConfig
+  include JSON::Serializable
+
+  enum Mode
+    Fast
+    Fair
+  end
+
+  getter weights : Hash(String, Int32) = {} of String => Int32
+  getter mode : Mode = Mode::Fair
+
+  def policy_name : String
+    "spec_weighted"
+  end
+end
+
+private class WeightedProvider < GRPC::LoadBalancer::Provider
+  def name : String
+    "spec_weighted"
+  end
+
+  def build(helper : GRPC::LoadBalancer::Helper) : GRPC::LoadBalancer
+    GRPC::RoundRobin.new(helper)
+  end
+
+  def parse_config(config : JSON::Any) : GRPC::LoadBalancingConfig
+    WeightedConfig.from_json(config.to_json)
+  end
+end
+
+GRPC::LoadBalancer.register(WeightedProvider.new)
+
+describe "custom load balancing configs" do
+  it "parses into the policy's own typed config" do
+    config = GRPC::ServiceConfig.parse(%({"loadBalancingConfig": [{"spec_weighted": {"weights": {"a": 3}, "mode": "fast"}}]}))
+    weighted = config.load_balancing.as(WeightedConfig)
+    weighted.weights.should eq({"a" => 3})
+    weighted.mode.should eq WeightedConfig::Mode::Fast
+    expect_raises(GRPC::ServiceConfig::Error, /Invalid spec_weighted config/) do
+      GRPC::ServiceConfig.parse(%({"loadBalancingConfig": [{"spec_weighted": {"mode": "slow"}}]}))
+    end
+    GRPC::Channel.new("localhost:1", load_balancing_policy: "spec_weighted").default_load_balancing.should be_a(WeightedConfig)
   end
 end

@@ -4,8 +4,8 @@ module GRPC
   # connection is lost the channel goes IDLE and reconnects on the next
   # call, starting from the first address again.
   #
-  # Config: `{"shuffleAddressList": true}` randomizes the address order on
-  # every resolver update (to spread clients over servers).
+  # Config: `PickFirstConfig` (`{"shuffleAddressList": true}` randomizes the
+  # address order on every resolver update, to spread clients over servers).
   #
   # When all addresses failed the policy reports TRANSIENT_FAILURE and keeps
   # it ("sticky") while retrying each address after its backoff, until one
@@ -20,12 +20,8 @@ module GRPC
         PickFirst.new(helper)
       end
 
-      def parse_config(config : JSON::Any) : JSON::Any
-        hash = config.as_h? || raise ArgumentError.new("config must be an object")
-        if (shuffle = hash["shuffleAddressList"]?) && shuffle.as_bool?.nil?
-          raise ArgumentError.new("shuffleAddressList must be a boolean")
-        end
-        config
+      def parse_config(config : JSON::Any) : LoadBalancingConfig
+        PickFirstConfig.from_json(config.to_json)
       end
     end
 
@@ -45,10 +41,10 @@ module GRPC
     def initialize(@helper : LoadBalancer::Helper, @random : Random = Random.new)
     end
 
-    def update(addresses : Array(Resolver::Address), config : JSON::Any) : Nil
+    def update(addresses : Array(Resolver::Address), config : LoadBalancingConfig) : Nil
       return if @shutdown
       addresses = addresses.uniq
-      addresses = addresses.shuffle(@random) if config["shuffleAddressList"]?.try(&.as_bool?)
+      addresses = addresses.shuffle(@random) if config.as?(PickFirstConfig).try(&.shuffle_address_list?)
 
       existing = @subchannels.index_by(&.address)
       @subchannels = addresses.map { |address| existing.delete(address) || new_subchannel(address) }

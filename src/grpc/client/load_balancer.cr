@@ -141,11 +141,19 @@ module GRPC
 
       abstract def build(helper : Helper) : LoadBalancer
 
-      # Validates the policy's config from `loadBalancingConfig`, returning
-      # it (possibly normalized). Raise `ArgumentError` if it is invalid.
-      def parse_config(config : JSON::Any) : JSON::Any
-        raise ArgumentError.new("config must be an object") unless config.as_h?
-        config
+      # Parses the policy's config from a service config's
+      # `loadBalancingConfig` entry into a typed `LoadBalancingConfig`.
+      # Raise `ArgumentError` (or a `JSON::SerializableError`) if it is
+      # invalid. Policies without options can rely on this default, which
+      # wraps the raw JSON in a `GenericLoadBalancingConfig`.
+      def parse_config(config : JSON::Any) : LoadBalancingConfig
+        GenericLoadBalancingConfig.new(name, config)
+      end
+
+      # The config used when the policy is selected without one (e.g. by
+      # name).
+      def default_config : LoadBalancingConfig
+        parse_config(JSON::Any.new({} of String => JSON::Any))
       end
     end
 
@@ -165,8 +173,9 @@ module GRPC
       @@registry_mutex.synchronize { @@providers.keys }
     end
 
-    # Receives new addresses (never empty) and the policy's config.
-    abstract def update(addresses : Array(Resolver::Address), config : JSON::Any) : Nil
+    # Receives new addresses (never empty) and the policy's config (as
+    # returned by its provider's `Provider#parse_config`).
+    abstract def update(addresses : Array(Resolver::Address), config : LoadBalancingConfig) : Nil
 
     # The resolver failed (or returned no addresses). Policies that have no
     # usable addresses should report TRANSIENT_FAILURE.

@@ -203,7 +203,7 @@ channel = GRPC::Channel.new("localhost:50051")                  # cleartext (DNS
 channel = GRPC::Channel.new("dns:///api.internal:443",
   credentials: GRPC::ChannelCredentials.tls)                    # TLS with system roots
 channel = GRPC::Channel.new("ipv4:10.0.0.1:50051,10.0.0.2:50051",
-  load_balancing_policy: "round_robin")
+  load_balancing_policy: GRPC::RoundRobinConfig.new)
 channel = GRPC::Channel.new("unix:/tmp/app.sock")               # UNIX socket
 client = Helloworld::Greeter::Client.new(channel, metadata: {"x-team" => "a"})
 
@@ -220,23 +220,51 @@ load balancing policies implement `GRPC::LoadBalancer`. Other channel options in
 
 ### Service config, retries and hedging
 
+`GRPC::ServiceConfig` is a typed, validated, `JSON::Serializable` object in gRPC's
+standard [service config](https://github.com/grpc/grpc/blob/master/doc/service_config.md)
+format, so the same file works with other gRPC implementations. Build it in code:
+
 ```crystal
-channel = GRPC::Channel.new("dns:///api:50051", service_config: <<-JSON)
-  {
-    "loadBalancingConfig": [{"round_robin": {}}],
-    "methodConfig": [{
-      "name": [{"service": "helloworld.Greeter"}],
-      "timeout": "2s",
-      "waitForReady": true,
-      "retryPolicy": {
-        "maxAttempts": 4, "initialBackoff": "0.1s", "maxBackoff": "1s",
-        "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]
-      }
-    }],
-    "retryThrottling": {"maxTokens": 10, "tokenRatio": 0.1}
-  }
-  JSON
+config = GRPC::ServiceConfig.new(
+  load_balancing_config: [GRPC::RoundRobinConfig.new] of GRPC::LoadBalancingConfig,
+  method_configs: [
+    GRPC::ServiceConfig::MethodConfig.new(
+      names: [GRPC::ServiceConfig::MethodName.new("helloworld.Greeter")],
+      timeout: 2.seconds,
+      wait_for_ready: true,
+      retry_policy: GRPC::ServiceConfig::RetryPolicy.new(
+        max_attempts: 4, initial_backoff: 100.milliseconds, max_backoff: 1.second,
+        backoff_multiplier: 2.0, retryable_status_codes: Set{GRPC::StatusCode::Unavailable})),
+  ],
+  retry_throttling: GRPC::ServiceConfig::RetryThrottling.new(max_tokens: 10, token_ratio: 0.1))
+channel = GRPC::Channel.new("dns:///api:50051", service_config: config)
 ```
+
+or load it from a file (`GRPC::ServiceConfig.load("service_config.json")`, or `.parse(json)`):
+
+```json
+{
+  "loadBalancingConfig": [{"round_robin": {}}],
+  "methodConfig": [{
+    "name": [{"service": "helloworld.Greeter"}],
+    "timeout": "2s",
+    "waitForReady": true,
+    "retryPolicy": {
+      "maxAttempts": 4, "initialBackoff": "0.1s", "maxBackoff": "1s",
+      "backoffMultiplier": 2, "retryableStatusCodes": ["UNAVAILABLE"]
+    }
+  }],
+  "retryThrottling": {"maxTokens": 10, "tokenRatio": 0.1}
+}
+```
+
+Durations are `Time::Span`, status codes are `GRPC::StatusCode`, and the deprecated
+`loadBalancingPolicy` is the `ServiceConfig::LoadBalancingPolicy` enum. Load balancing
+configs are typed per policy (`GRPC::PickFirstConfig`, `GRPC::RoundRobinConfig`); custom
+policies parse their own `GRPC::LoadBalancingConfig` subclass in
+`LoadBalancer::Provider#parse_config`, and entries for policies that aren't registered
+are skipped as gRPC requires. Invalid configs raise `GRPC::ServiceConfig::Error`;
+`#to_json` writes the config back in the standard format.
 
 Retries and hedging follow gRFC A6: buffered requests are replayed on new attempts until
 the call commits, server pushback (`grpc-retry-pushback-ms`) is honoured, and streams

@@ -44,7 +44,7 @@ private class DroppingPolicy < GRPC::LoadBalancer
   def initialize(@helper : GRPC::LoadBalancer::Helper)
   end
 
-  def update(addresses : Array(GRPC::Resolver::Address), config : JSON::Any) : Nil
+  def update(addresses : Array(GRPC::Resolver::Address), config : GRPC::LoadBalancingConfig) : Nil
     return if @subchannel
     subchannel = @helper.create_subchannel(addresses.first)
     @subchannel = subchannel
@@ -124,7 +124,7 @@ describe "GRPC load balancing" do
     end
 
     it "validates its config" do
-      expect_raises(GRPC::ServiceConfig::Error, /shuffleAddressList/) do
+      expect_raises(GRPC::ServiceConfig::Error, /Invalid pick_first config/) do
         GRPC::ServiceConfig.parse(%({"loadBalancingConfig": [{"pick_first": {"shuffleAddressList": 1}}]}))
       end
     end
@@ -169,7 +169,7 @@ describe "GRPC load balancing" do
     it "is TRANSIENT_FAILURE only when all servers fail" do
       ports = Array.new(2) { ClientSpec.free_port }
       channel = GRPC::Channel.new("ipv4:127.0.0.1:#{ports[0]},127.0.0.1:#{ports[1]}",
-        load_balancing_policy: "round_robin", backoff: ClientSpec::FAST_BACKOFF)
+        load_balancing_policy: GRPC::RoundRobinConfig.new, backoff: ClientSpec::FAST_BACKOFF)
       GRPCSpec.within do
         channel.connect
         ClientSpec.wait_until { channel.state.transient_failure? }

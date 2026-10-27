@@ -16,6 +16,10 @@ module GRPC
       def build(helper : LoadBalancer::Helper) : LoadBalancer
         RoundRobin.new(helper)
       end
+
+      def parse_config(config : JSON::Any) : LoadBalancingConfig
+        RoundRobinConfig.from_json(config.to_json)
+      end
     end
 
     # Picks the READY subchannels in turn.
@@ -41,7 +45,7 @@ module GRPC
     def initialize(@helper : LoadBalancer::Helper, @random : Random = Random.new)
     end
 
-    def update(addresses : Array(Resolver::Address), config : JSON::Any) : Nil
+    def update(addresses : Array(Resolver::Address), config : LoadBalancingConfig) : Nil
       return if @shutdown
       existing = @subchannels.index_by(&.address)
       @subchannels = addresses.uniq.map do |address|

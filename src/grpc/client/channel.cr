@@ -50,7 +50,14 @@ module GRPC
     # Limit of the sent messages buffered for retries, for all calls.
     getter retry_buffer_size : Int64
     # The policy used when the service config does not select one.
-    getter default_load_balancing_policy : String
+    # The load balancing policy used when the service config selects none.
+    getter default_load_balancing : LoadBalancingConfig
+
+    # The name of `#default_load_balancing`.
+    def default_load_balancing_policy : String
+      @default_load_balancing.policy_name
+    end
+
     # The service config used when the resolver does not provide one.
     getter default_service_config : ServiceConfig?
 
@@ -96,7 +103,9 @@ module GRPC
     #   config returned by the resolver takes precedence unless
     #   *disable_service_config_lookup* is set.
     # * *load_balancing_policy*: the policy used when the service config
-    #   does not choose one.
+    #   does not choose one: a typed config (`PickFirstConfig`,
+    #   `RoundRobinConfig`, ...), a `ServiceConfig::LoadBalancingPolicy` or
+    #   the name of a registered policy.
     # * *resolver*: a resolver provider used instead of the registered one.
     # * *backoff*: connection backoff parameters.
     # * *idle_timeout*: release connections after this long without calls
@@ -111,7 +120,8 @@ module GRPC
                    initial_window_size : UInt32 = 1_048_576_u32, connection_window_size : Int32 = 16_777_216,
                    max_header_list_size : UInt32 = 16_384_u32 * 1024,
                    service_config : String | ServiceConfig | Nil = nil, disable_service_config_lookup : Bool = false,
-                   load_balancing_policy : String = "pick_first", resolver : Resolver::Provider? = nil,
+                   load_balancing_policy : String | ServiceConfig::LoadBalancingPolicy | LoadBalancingConfig = PickFirstConfig.new,
+                   resolver : Resolver::Provider? = nil,
                    @backoff : ConnectionBackoff = ConnectionBackoff.new, @idle_timeout : Time::Span? = DEFAULT_IDLE_TIMEOUT,
                    @keepalive : KeepaliveOptions? = nil, enable_retries : Bool = true,
                    @per_rpc_buffer_size : Int32 = DEFAULT_PER_RPC_BUFFER_SIZE,
@@ -122,7 +132,7 @@ module GRPC
       @retries_enabled = enable_retries
       @retry_buffer_size = retry_buffer_size.to_i64
       @disable_service_config_lookup = disable_service_config_lookup
-      @default_load_balancing_policy = Channel.check_policy(load_balancing_policy)
+      @default_load_balancing = Channel.to_load_balancing(load_balancing_policy)
       @default_service_config = Channel.to_service_config(service_config)
 
       parsed = Target.parse(target, ->(scheme : String) {
@@ -164,7 +174,7 @@ module GRPC
       @retries_enabled = enable_retries
       @retry_buffer_size = retry_buffer_size.to_i64
       @disable_service_config_lookup = false
-      @default_load_balancing_policy = "pick_first"
+      @default_load_balancing = PickFirstConfig.new
       @default_service_config = Channel.to_service_config(service_config)
       @parsed_target = Target.new("custom", "", @target, @target, false)
       @credentials = ChannelCredentials.insecure
@@ -548,8 +558,8 @@ module GRPC
         return
       end
 
-      name = config.try(&.load_balancing_policy) || @default_load_balancing_policy
-      lb_config = config.try(&.load_balancing_config) || JSON::Any.new({} of String => JSON::Any)
+      lb_config = config.try(&.load_balancing) || @default_load_balancing
+      name = lb_config.policy_name
       provider = LoadBalancer.provider(name) || raise "Unknown load balancing policy #{name}"
 
       @mutex.synchronize do
@@ -709,9 +719,17 @@ module GRPC
     end
 
     # :nodoc:
-    def self.check_policy(name : String) : String
-      LoadBalancer.provider(name) || raise ArgumentError.new("Unknown load balancing policy #{name.inspect}")
-      name
+    def self.to_load_balancing(policy : String | ServiceConfig::LoadBalancingPolicy | LoadBalancingConfig) : LoadBalancingConfig
+      case policy
+      in LoadBalancingConfig
+        LoadBalancer.provider(policy.policy_name) || raise ArgumentError.new("Unknown load balancing policy #{policy.policy_name.inspect}")
+        policy
+      in ServiceConfig::LoadBalancingPolicy
+        policy.to_config
+      in String
+        provider = LoadBalancer.provider(policy) || raise ArgumentError.new("Unknown load balancing policy #{policy.inspect}")
+        provider.default_config
+      end
     end
   end
 
