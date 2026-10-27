@@ -15,6 +15,8 @@
 #   PROTOBUF_VERSION  protobuf release to build (default: from `protoc --version`)
 #   CONFORMANCE_RUNNER  use an existing conformance_test_runner binary
 #   JOBS              build parallelism (default: 8)
+#   ABSL_PROVIDER     "package" (an installed Abseil, default) or "module"
+#                     (let CMake fetch Abseil)
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
@@ -34,7 +36,7 @@ if [ ! -x "$RUNNER" ]; then
   fi
   echo "== Building conformance_test_runner (protobuf v$VERSION)"
   cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 \
-    -Dprotobuf_ABSL_PROVIDER=package -Dprotobuf_BUILD_TESTS=OFF \
+    -Dprotobuf_ABSL_PROVIDER="${ABSL_PROVIDER:-package}" -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_CONFORMANCE=ON -Dprotobuf_INSTALL=OFF > "$WORK/cmake.log"
   cmake --build "$BUILD" --target conformance_test_runner -j "$JOBS" > "$WORK/build.log"
 fi

@@ -13,13 +13,15 @@ module GRPC
     getter backoff : ConnectionBackoff
     getter keepalive : KeepaliveOptions?
     getter io_factory : Proc(IO)?
+    getter dialer : Proc(Resolver::Address, Time::Instant, IO)?
 
     @connections = Set(HTTP2::Connection).new
     @mutex = Mutex.new
 
     def initialize(@credentials : ChannelCredentials, @authority : String, @settings : HTTP2::Settings,
                    @connection_window_size : Int32, @backoff : ConnectionBackoff,
-                   @keepalive : KeepaliveOptions? = nil, @io_factory : Proc(IO)? = nil)
+                   @keepalive : KeepaliveOptions? = nil, @io_factory : Proc(IO)? = nil,
+                   @dialer : Proc(Resolver::Address, Time::Instant, IO)? = nil)
     end
 
     # The host name used for TLS SNI and certificate verification.
@@ -34,26 +36,23 @@ module GRPC
       if factory = @io_factory
         return factory.call
       end
-      socket = case address.kind
-               in .tcp?
-                 tcp = TCPSocket.new(address.host, address.port, connect_timeout: remaining(deadline))
-                 tcp.tcp_nodelay = true
-                 tcp
-               in .unix?
-                 UNIXSocket.new(address.path)
-               in .unix_abstract?
-                 raise Socket::Error.new("Abstract UNIX sockets are not supported by this runtime")
-               in .custom?
-                 raise Socket::Error.new("Address #{address} requires a custom IO factory")
+      socket = if dialer = @dialer
+                 dialer.call(address, deadline)
+               else
+                 dial(address, deadline)
                end
       context = @credentials.tls_context
       return socket unless context
       begin
-        socket.read_timeout = remaining(deadline)
-        socket.write_timeout = remaining(deadline)
+        if socket.is_a?(Socket)
+          socket.read_timeout = remaining(deadline)
+          socket.write_timeout = remaining(deadline)
+        end
         ssl = OpenSSL::SSL::Socket::Client.new(socket, context, sync_close: true, hostname: server_name)
-        socket.read_timeout = nil
-        socket.write_timeout = nil
+        if socket.is_a?(Socket)
+          socket.read_timeout = nil
+          socket.write_timeout = nil
+        end
         unless ssl.alpn_protocol == "h2"
           ssl.close rescue nil
           raise Socket::Error.new("Server did not negotiate h2 via ALPN")
@@ -62,6 +61,21 @@ module GRPC
       rescue e
         socket.close rescue nil
         raise e
+      end
+    end
+
+    private def dial(address : Resolver::Address, deadline : Time::Instant) : IO
+      case address.kind
+      in .tcp?
+        tcp = TCPSocket.new(address.host, address.port, connect_timeout: remaining(deadline))
+        tcp.tcp_nodelay = true
+        tcp
+      in .unix?
+        UNIXSocket.new(address.path)
+      in .unix_abstract?
+        raise Socket::Error.new("Abstract UNIX sockets are not supported by this runtime")
+      in .custom?
+        raise Socket::Error.new("Address #{address} requires a custom dialer")
       end
     end
 

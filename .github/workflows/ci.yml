@@ -1,0 +1,268 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: "Test scale: branch (fast) or nightly (deep campaigns)"
+        type: choice
+        options: [branch, nightly]
+        default: nightly
+  schedule:
+    - cron: "17 3 * * *" # nightly deep campaigns
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CRYSTAL_VERSION: "1.19.1"
+  PROTOC_VERSION: "36.2"
+  # branch: quick but meaningful runs on every push; nightly: deep campaigns.
+  SCALE: ${{ (github.event_name == 'schedule' || inputs.scale == 'nightly') && 'nightly' || 'branch' }}
+  PYTHON_PACKAGES: grpcio grpcio-tools grpcio-reflection sonora protobuf
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Check formatting of hand-written code
+        # Generated *.pb.cr files are verified against the generator by the specs.
+        run: find src spec examples bench -name '*.cr' -not -path '*/generated/*' -not -name '*.pb.cr' -print0 | xargs -0 crystal tool format --check
+
+  specs:
+    name: Specs (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python gRPC (cross-implementation specs)
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet $PYTHON_PACKAGES
+          echo "PYTHON=$RUNNER_TEMP/venv/bin/python" >> "$GITHUB_ENV"
+      - name: Run specs
+        run: crystal spec --order random
+
+  specs-mt:
+    name: Specs (multi-threaded)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - name: Run specs on a 4-thread execution context
+        env:
+          GRPC_SPEC_THREADS: "4"
+          HTTP2_SPEC_WORKERS: "4"
+          # The simulation requires the single-threaded scheduler.
+          SKIP_SIMULATION: "1"
+        run: crystal spec --order random -Dpreview_mt -Dexecution_context
+
+  h2spec:
+    name: h2spec (strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install h2spec
+        run: |
+          mkdir -p "$RUNNER_TEMP/h2spec"
+          curl -sSfL https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz | tar -xz -C "$RUNNER_TEMP/h2spec"
+          echo "$RUNNER_TEMP/h2spec" >> "$GITHUB_PATH"
+      - name: Run h2spec
+        run: script/h2spec.sh -S
+
+  interop:
+    name: Interop (grpcio, grpc-go, TLS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Install reference implementations
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet $PYTHON_PACKAGES
+          echo "PYTHON=$RUNNER_TEMP/venv/bin/python" >> "$GITHUB_ENV"
+          go install google.golang.org/grpc/interop/client@latest
+          go install google.golang.org/grpc/interop/server@latest
+          echo "GOBIN=$(go env GOPATH)/bin" >> "$GITHUB_ENV"
+      - name: Run the interop matrix
+        run: script/interop.sh
+
+  conformance:
+    name: Protobuf conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - name: Cache the conformance runner
+        id: runner-cache
+        uses: actions/cache@v4
+        with:
+          path: tmp/conformance/build/conformance_test_runner
+          key: conformance-runner-${{ runner.os }}-${{ env.PROTOC_VERSION }}
+      - name: Use the cached runner
+        if: steps.runner-cache.outputs.cache-hit == 'true'
+        run: echo "CONFORMANCE_RUNNER=$PWD/tmp/conformance/build/conformance_test_runner" >> "$GITHUB_ENV"
+      - name: Run the conformance suite
+        env:
+          ABSL_PROVIDER: module
+          JOBS: "4"
+        run: script/conformance.sh
+      - name: Upload results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: tmp/conformance/results
+
+  simulation:
+    name: Deterministic simulation
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Choose the campaign size
+        run: |
+          if [ "$SCALE" = nightly ]; then
+            echo "SIM_SEEDS=2000" >> "$GITHUB_ENV"; echo "SIM_CLEAN_SEEDS=500" >> "$GITHUB_ENV"
+          else
+            echo "SIM_SEEDS=200" >> "$GITHUB_ENV"; echo "SIM_CLEAN_SEEDS=60" >> "$GITHUB_ENV"
+          fi
+          # Fresh seeds every run (the run number), reproducible from the log.
+          echo "SIM_FIRST_SEED=$(( ${{ github.run_number }} * 100000 ))" >> "$GITHUB_ENV"
+      - name: Simulate with faults (every seed replayed for determinism)
+        env:
+          DETERMINISM: "1"
+        run: script/sim.sh "$SIM_SEEDS" "$SIM_FIRST_SEED" 30
+      - name: Simulate without faults (strict oracle)
+        env:
+          DETERMINISM: "1"
+          NO_FAULTS: "1"
+        run: script/sim.sh "$SIM_CLEAN_SEEDS" "$((SIM_FIRST_SEED + 50000))" 30
+      - name: Upload failing seeds
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-logs
+          path: tmp/sim
+
+  fuzz:
+    name: Fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python protobuf (differential fuzzing)
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet $PYTHON_PACKAGES
+          echo "PYTHON=$RUNNER_TEMP/venv/bin/python" >> "$GITHUB_ENV"
+      - name: Choose the campaign length
+        run: |
+          if [ "$SCALE" = nightly ]; then
+            echo "FUZZ_HTTP2=20m" >> "$GITHUB_ENV"; echo "FUZZ_PROTOBUF=300" >> "$GITHUB_ENV"
+          else
+            echo "FUZZ_HTTP2=4m" >> "$GITHUB_ENV"; echo "FUZZ_PROTOBUF=45" >> "$GITHUB_ENV"
+          fi
+      - name: Fuzz HTTP/2 and HPACK
+        run: script/fuzz.sh all "$FUZZ_HTTP2" "${{ github.run_number }}"
+      - name: Fuzz protobuf (binary, JSON, .proto parser, differential vs Python)
+        run: script/fuzz_protobuf.sh "$FUZZ_PROTOBUF" binary json proto python
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: tmp/fuzz
+
+  soak:
+    name: Soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: Install protoc
+        run: echo "$(script/ci/install_protoc.sh "$PROTOC_VERSION" "$RUNNER_TEMP/protoc")" >> "$GITHUB_PATH"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Install the grpc-go interop client
+        run: go install google.golang.org/grpc/interop/client@latest
+      - name: Choose the soak size
+        run: |
+          if [ "$SCALE" = nightly ]; then
+            echo "SOAK_RPC=20000" >> "$GITHUB_ENV"; echo "SOAK_CHANNEL=8000" >> "$GITHUB_ENV"; echo "SOAK_SECONDS=600" >> "$GITHUB_ENV"
+          else
+            echo "SOAK_RPC=5000" >> "$GITHUB_ENV"; echo "SOAK_CHANNEL=2000" >> "$GITHUB_ENV"; echo "SOAK_SECONDS=90" >> "$GITHUB_ENV"
+          fi
+      - name: grpc-go soak tests (rpc_soak, channel_soak)
+        run: script/soak.sh "$SOAK_RPC" "$SOAK_CHANNEL" 8
+      - name: In-process mixed-workload soak (leaks, heap growth)
+        run: |
+          crystal build --release bench/soak.cr -o bin/soak
+          bin/soak --duration="$SOAK_SECONDS" --concurrency=64 --report-every=30

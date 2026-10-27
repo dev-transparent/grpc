@@ -74,6 +74,9 @@ module GRPC
     # Call state, protected by @mutex.
     @mutex = Mutex.new
     @attempts = [] of Attempt
+    # Attempts whose buffered messages are being replayed (not yet in
+    # `@attempts`).
+    @replaying = [] of Attempt
     @committed : Attempt? = nil
     @commit_pending = false
     @response_attempt : Attempt? = nil
@@ -727,12 +730,21 @@ module GRPC
     # waits for its response headers in a new fiber.
     private def register_attempt(attempt : Attempt) : Nil
       @send_mutex.synchronize do
-        buffered, closed = @mutex.synchronize { {@buffer.dup, @send_closed} }
-        buffered.each_with_index do |frame, i|
-          attempt.stream.send_data(frame, closed && i == buffered.size - 1)
-          attempt.messages_sent += 1
-        rescue HTTP2::Error | IO::Error
-          break
+        # Track the attempt while replaying: the replay may block on flow
+        # control, and deadlines and cancellation must still reset it.
+        buffered, closed = @mutex.synchronize do
+          @replaying << attempt
+          {@buffer.dup, @send_closed}
+        end
+        begin
+          buffered.each_with_index do |frame, i|
+            attempt.stream.send_data(frame, closed && i == buffered.size - 1)
+            attempt.messages_sent += 1
+          rescue HTTP2::Error | IO::Error
+            break
+          end
+        ensure
+          @mutex.synchronize { @replaying.delete(attempt) }
         end
         if closed && buffered.empty?
           attempt.stream.close_send rescue nil
@@ -1060,7 +1072,7 @@ module GRPC
 
     private def reset_attempts(code : HTTP2::ErrorCode) : Nil
       attempts = @mutex.synchronize do
-        list = @attempts.dup
+        list = @attempts + @replaying
         [@committed, @response_attempt].each { |a| list << a if a && !list.includes?(a) }
         list
       end

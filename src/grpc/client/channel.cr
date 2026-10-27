@@ -83,6 +83,7 @@ module GRPC
     @policy_name : String? = nil
     @helper : Helper? = nil
     @subchannels = Set(Subchannel).new
+    @idle_stop : ::Channel(Nil)? = nil
     @service_config : ServiceConfig? = nil
     @config_ready = false
     @resolution_error : String? = nil
@@ -114,6 +115,9 @@ module GRPC
     # * *enable_retries*, *per_rpc_buffer_size*, *retry_buffer_size*:
     #   retry support (gRFC A6).
     # * *stats_handlers*: observers of every call (see `GRPC::Stats`).
+    # * *dialer*: opens the transport to a resolved address instead of a
+    #   TCP or UNIX socket (e.g. a custom transport, a proxy tunnel or a
+    #   simulated network); TLS credentials are applied on top of it.
     def initialize(target : String, *, tls : Bool | OpenSSL::SSL::Context::Client | Nil = nil,
                    credentials : ChannelCredentials? = nil,
                    authority : String? = nil, @user_agent : String = DEFAULT_USER_AGENT,
@@ -126,7 +130,8 @@ module GRPC
                    @keepalive : KeepaliveOptions? = nil, enable_retries : Bool = true,
                    @per_rpc_buffer_size : Int32 = DEFAULT_PER_RPC_BUFFER_SIZE,
                    retry_buffer_size : Int = DEFAULT_RETRY_BUFFER_SIZE,
-                   stats_handlers : Array(StatsHandler) = [] of StatsHandler)
+                   stats_handlers : Array(StatsHandler) = [] of StatsHandler,
+                   dialer : Proc(Resolver::Address, Time::Instant, IO)? = nil)
       @stats = Stats::Dispatcher.new(stats_handlers.dup)
       @target = target
       @retries_enabled = enable_retries
@@ -158,7 +163,8 @@ module GRPC
 
       settings = HTTP2::Settings.new(enable_push: false, initial_window_size: initial_window_size,
         max_header_list_size: max_header_list_size)
-      @transport = TransportOptions.new(@credentials, @authority, settings, connection_window_size, @backoff, @keepalive)
+      @transport = TransportOptions.new(@credentials, @authority, settings, connection_window_size, @backoff, @keepalive,
+        dialer: dialer)
       ChannelzRegistry.register(self)
     end
 
@@ -491,6 +497,9 @@ module GRPC
         return unless force || (@active_calls == 0 && idle_expired?)
         @idle_mode = true
         @generation += 1
+        # Wake the idle timer so it exits now rather than after its sleep.
+        @idle_stop.try &.close
+        @idle_stop = nil
         resolver = @resolver
         @resolver = nil
         @generation
@@ -517,6 +526,11 @@ module GRPC
     # Enters idle mode once there were no calls for `idle_timeout`.
     private def start_idle_timer(generation : Int32) : Nil
       return unless timeout = @idle_timeout
+      stop = ::Channel(Nil).new
+      @mutex.synchronize do
+        @idle_stop.try &.close
+        @idle_stop = stop
+      end
       spawn(name: "grpc-channel-idle") do
         loop do
           wait = @mutex.synchronize do
@@ -532,7 +546,11 @@ module GRPC
           if wait <= Time::Span.zero
             enter_idle(force: false)
           else
-            sleep wait
+            select
+            when stop.receive?
+              break
+            when timeout(wait)
+            end
           end
         end
       end

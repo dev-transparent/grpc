@@ -591,12 +591,48 @@ PYTHON=/path/to/venv/bin/python script/interop.sh  # interop vs. grpcio and grpc
 script/soak.sh                                # grpc-go soak tests (rpc_soak, channel_soak)
 crystal run --release bench/soak.cr -- --duration=300  # in-process soak (leaks, heap)
 script/fuzz.sh all 10m                        # HTTP/2 + HPACK fuzzing
+DETERMINISM=1 script/sim.sh 1000              # deterministic simulation campaign
 script/generate_well_known_types.sh           # regenerate bundled protos (self-hosting)
 script/generate_spec_protos.sh                # regenerate protobuf spec fixtures
 script/generate_grpc_spec_protos.sh           # regenerate gRPC spec fixtures
 script/conformance.sh                         # protobuf conformance suite (builds the runner)
 script/fuzz_protobuf.sh 150                   # protobuf fuzzing, 150 s per target
 ```
+
+### Deterministic simulation testing
+
+`spec/sim` runs the real stack (HTTP/2, protobuf, servers, channels with load balancing,
+retries, hedging and keepalive) inside a deterministic simulation, in the style of
+FoundationDB and TigerBeetle:
+
+- **Virtual time.** A simulated event loop replaces Crystal's: `Time.instant`,
+  `Time.utc`, `sleep` and `select ... timeout` use a virtual clock that jumps to the next
+  timer whenever every fiber is blocked. Minutes of traffic run in about a second.
+- **Simulated network.** In-memory TCP connections with seeded latency, jitter,
+  bandwidth, random segment splitting and a flow-control window.
+- **Faults.** Partitions (one- or two-way), connection resets, server crashes and
+  restarts, graceful drains, latency spikes, resolver changes, tiny segments and windows.
+- **Seeded randomness.** `Random::Secure` and the default generators are seeded, and the
+  single-threaded scheduler makes every run a pure function of its seed.
+- **Oracle.** Each run checks:
+  - responses are correct, with in-order, exactly-once delivery for streams
+  - requests execute at most once unless a retry policy allows more
+  - only legitimate status codes are returned (stricter without faults)
+  - deadlines are honoured, every call completes, and bulk transfers succeed without faults
+  - nothing leaks at shutdown: connections, server calls or fibers
+- **Determinism self-check.** Every run prints a hash of its event trace; replaying a seed
+  must reproduce it exactly.
+
+```sh
+crystal build spec/sim/sim.cr -o bin/sim
+bin/sim --seed=1234 --verbose         # replay one seed with its event trace
+script/sim.sh 1000                    # 1000 seeds in parallel
+DETERMINISM=1 script/sim.sh 200       # also replay every seed and compare traces
+NO_FAULTS=1 script/sim.sh 200         # without faults (stricter oracle)
+```
+
+Seeds reproduce a run for a given version of the harness; changing the workload or
+the stack changes what a seed does.
 
 Generated `*.pb.cr` files are checked in and verified against the generator by the
 specs, so don't run `crystal tool format` over them.
@@ -616,6 +652,7 @@ What is verified, and how:
 | Protocol Buffers | protobuf's official conformance suite (5,649 binary and JSON tests, 0 failures); golden tests against `protoc`; randomized differential tests against Python's protobuf; fuzzing of the decoder, JSON and `.proto` parser; parser output identical to `protoc`'s |
 | gRPC | interop matrix above; grpc-go `rpc_soak` (20,000 iterations, 16 threads) and `channel_soak`; reflection checked with grpcio-reflection and grpcurl; channelz with grpcdebug; gRPC-Web with the sonora client; in-process soak with leak and heap checks |
 | Concurrency | the whole suite also runs on a multi-threaded execution context |
+| Whole system | deterministic simulation: thousands of seeded runs of servers and clients under randomized workloads and faults, checked by an oracle and replayable from their seed |
 
 ## License
 

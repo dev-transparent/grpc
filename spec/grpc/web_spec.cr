@@ -243,7 +243,7 @@ describe "gRPC-Web over HTTP/1.1" do
   end
 
   it "interoperates with the sonora Python gRPC-Web client" do
-    python = "/tmp/grpc-venv-dir/venv/bin/python"
+    python = ENV["PYTHON"]? || "/tmp/grpc-venv-dir/venv/bin/python"
     unless File.exists?(python) && Process.run(python, ["-c", "import sonora.client"]).success?
       pending!("sonora not available")
     end

@@ -115,7 +115,7 @@ describe GRPC::Reflection do
   end
 
   it "works with the official grpcio reflection client" do
-    python = "/tmp/grpc-venv-dir/venv/bin/python"
+    python = ENV["PYTHON"]? || "/tmp/grpc-venv-dir/venv/bin/python"
     unless File.exists?(python) && Process.run(python, ["-c", "import grpc_reflection"]).success?
       pending!("grpcio-reflection not available")
     end

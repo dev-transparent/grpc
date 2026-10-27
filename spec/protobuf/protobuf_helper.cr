@@ -55,7 +55,7 @@ module ProtobufSpec
     google/protobuf/wrappers.proto
   )
 
-  PYTHON = "/tmp/grpc-venv-dir/venv/bin/python"
+  PYTHON = ENV["PYTHON"]? || "/tmp/grpc-venv-dir/venv/bin/python"
 
   def self.protoc : String?
     Process.find_executable("protoc")
