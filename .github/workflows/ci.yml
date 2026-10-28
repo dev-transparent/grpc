@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Pushes to main; other branches are tested through their pull requests.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
