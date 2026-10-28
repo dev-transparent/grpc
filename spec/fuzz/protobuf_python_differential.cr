@@ -60,7 +60,8 @@ module ProtobufFuzz
         seeds = Array.new(8) { generator.generate(type_name) }
         mutator = Mutator.new(@random, seeds)
         inputs = Array.new(count) { @random.rand < 0.1 ? seeds.sample(@random) : mutator.mutate(seeds.sample(@random)) }
-        results = inputs.map do |input|
+        errors = {} of Int32 => String
+        results = inputs.map_with_index do |input, index|
           @executions += 1
           begin
             encoded = klass.from_protobuf(input).to_protobuf
@@ -68,18 +69,24 @@ module ProtobufFuzz
               bytes[0] = 1_u8
               encoded.copy_to(bytes + 1)
             end
-          rescue Protobuf::DecodeError
+          rescue ex : Protobuf::DecodeError
+            errors[index] = ex.message.to_s
             Bytes[0]
           rescue ex
             @findings << Finding.new("python", input, "#{kind}: #{ex.class}: #{ex.message}")
             Bytes[0]
           end
         end
-        compare(kind, inputs, results)
+        compare(kind, inputs, results, errors)
       end
     end
 
-    private def compare(kind : String, inputs : Array(Bytes), results : Array(Bytes)) : Nil
+    # Field number 0 is invalid wherever it appears, and Crystal rejects it.
+    # Newer upb versions (protobuf 7.x) tolerate it inside unknown groups
+    # they skip, so that disagreement is not a finding.
+    TOLERATED_REJECTIONS = {"Invalid field number 0"}
+
+    private def compare(kind : String, inputs : Array(Bytes), results : Array(Bytes), errors : Hash(Int32, String)) : Nil
       Dir.mkdir_p(WORKDIR)
       inputs_path = File.join(WORKDIR, "#{Process.pid}-inputs.bin")
       results_path = File.join(WORKDIR, "#{Process.pid}-results.bin")
@@ -90,6 +97,7 @@ module ProtobufFuzz
       output.each_line do |line|
         next unless line.starts_with?("MISMATCH ")
         index = line.split(' ')[1].to_i
+        next if line.includes?("python=ok crystal=error") && TOLERATED_REJECTIONS.includes?(errors[index]?)
         @findings << Finding.new("python", inputs[index], "#{kind}: #{line}")
       end
     ensure

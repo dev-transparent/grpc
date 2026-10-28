@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Pushes to main; other branches are tested through their pull requests.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -29,6 +30,7 @@ env:
   PYTHON_PACKAGES: grpcio grpcio-tools grpcio-reflection sonora protobuf
 
 jobs:
+  # Cheap and quick: every other job waits for it.
   format:
     name: Format
     runs-on: ubuntu-latest
@@ -43,12 +45,9 @@ jobs:
         run: find src spec examples bench -name '*.cr' -not -path '*/generated/*' -not -name '*.pb.cr' -print0 | xargs -0 crystal tool format --check
 
   specs:
-    name: Specs (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Specs
+    needs: format
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +69,7 @@ jobs:
 
   specs-mt:
     name: Specs (multi-threaded)
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -89,6 +89,7 @@ jobs:
 
   h2spec:
     name: h2spec (strict)
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -106,6 +107,7 @@ jobs:
 
   interop:
     name: Interop (grpcio, grpc-go, TLS)
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -135,6 +137,7 @@ jobs:
 
   conformance:
     name: Protobuf conformance
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -148,8 +151,11 @@ jobs:
         id: runner-cache
         uses: actions/cache@v4
         with:
-          path: tmp/conformance/build/conformance_test_runner
-          key: conformance-runner-${{ runner.os }}-${{ env.PROTOC_VERSION }}
+          # The runner loads the jsoncpp it was built with from the build tree.
+          path: |
+            tmp/conformance/build/conformance_test_runner
+            tmp/conformance/build/_deps/jsoncpp-build/src/lib_json/libjsoncpp.so*
+          key: conformance-runner-v2-${{ runner.os }}-${{ env.PROTOC_VERSION }}
       - name: Use the cached runner
         if: steps.runner-cache.outputs.cache-hit == 'true'
         run: echo "CONFORMANCE_RUNNER=$PWD/tmp/conformance/build/conformance_test_runner" >> "$GITHUB_ENV"
@@ -167,6 +173,7 @@ jobs:
 
   simulation:
     name: Deterministic simulation
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -201,6 +208,7 @@ jobs:
 
   fuzz:
     name: Fuzzing
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -238,6 +246,7 @@ jobs:
 
   soak:
     name: Soak
+    needs: format
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
