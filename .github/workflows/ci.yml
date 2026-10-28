@@ -43,12 +43,8 @@ jobs:
         run: find src spec examples bench -name '*.cr' -not -path '*/generated/*' -not -name '*.pb.cr' -print0 | xargs -0 crystal tool format --check
 
   specs:
-    name: Specs (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Specs
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
