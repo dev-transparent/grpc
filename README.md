@@ -634,6 +634,36 @@ NO_FAULTS=1 script/sim.sh 200         # without faults (stricter oracle)
 Seeds reproduce a run for a given version of the harness; changing the workload or
 the stack changes what a seed does.
 
+### Performance comparison
+
+Every pull request is benchmarked against its base branch on the same runner
+(`.github/workflows/perf.yml`). The workflow posts the results as a PR comment and in the
+job summary. The comparison is informational and never fails the check. `bench/perf.cr`
+covers two kinds of benchmark:
+
+- **Micro benchmarks:** HPACK, protobuf binary and JSON, gRPC framing and HTTP/2 frame
+  parsing. Each reports time and bytes allocated per operation, plus instructions per
+  operation counted with cachegrind. Instruction counts are deterministic, so they stay
+  comparable on noisy shared runners.
+- **End-to-end benchmarks:** unary, streaming and ping-pong RPCs over loopback. Each
+  reports throughput, p50/p99 latency and allocations per call.
+
+The base and the PR run in interleaved rounds and medians are compared. A change is marked
+only when it is significant:
+
+| Metric | Threshold |
+|--------|-----------|
+| Instructions | at least 0.5% |
+| Allocations | at least 1% |
+| Wall-clock | at least 3%, and the 95% bootstrap confidence interval excludes zero |
+
+```sh
+crystal build --release bench/perf.cr -o bin/perf
+bin/perf --only=micro                          # JSON lines on stdout
+script/perf/run.sh bin/perf-main bin/perf out  # compare two builds (valgrind optional)
+script/perf/compare.py out                     # markdown report
+```
+
 Generated `*.pb.cr` files are checked in and verified against the generator by the
 specs, so don't run `crystal tool format` over them.
 
