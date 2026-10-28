@@ -29,6 +29,13 @@ JOBS="${JOBS:-8}"
 mkdir -p "$WORK" "$RESULTS" bin
 
 RUNNER="${CONFORMANCE_RUNNER:-$BUILD/conformance_test_runner}"
+# A runner restored without its shared libraries (e.g. from a CI cache) is
+# rebuilt.
+if [ -x "$RUNNER" ] && command -v ldd > /dev/null && ldd "$RUNNER" | grep -q "not found"; then
+  echo "== $RUNNER is missing shared libraries; rebuilding"
+  RUNNER="$BUILD/conformance_test_runner"
+  rm -f "$RUNNER"
+fi
 if [ ! -x "$RUNNER" ]; then
   if [ ! -d "$SRC" ]; then
     echo "== Fetching protobuf v$VERSION"
